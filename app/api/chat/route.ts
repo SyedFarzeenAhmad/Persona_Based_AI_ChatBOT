@@ -1,3 +1,4 @@
+import { GoogleGenerativeAI } from "@google/generative-ai"
 import { NextRequest, NextResponse } from "next/server"
 
 // System prompts for each persona (placeholder - will be replaced with actual prompts)
@@ -110,74 +111,49 @@ export async function POST(request: NextRequest) {
     }
 
     if (!activePersona || !(activePersona in SYSTEM_PROMPTS)) {
-      return NextResponse.json(
-        { error: "Invalid persona selected" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Invalid persona selected" }, { status: 400 })
     }
 
     // Get the appropriate system prompt
-    const systemPrompt =
-      SYSTEM_PROMPTS[activePersona as keyof typeof SYSTEM_PROMPTS]
+    const systemPrompt = SYSTEM_PROMPTS[activePersona as keyof typeof SYSTEM_PROMPTS]
 
-    // Prepare messages for OpenAI API
-    // Convert messages to the format expected by OpenAI
-    const formattedMessages = [
-      { role: "system", content: systemPrompt },
-      ...messages.map((msg) => ({
-        role: msg.role as "user" | "assistant",
-        content: msg.content,
-      })),
-    ]
-
-    // Call OpenAI API
-    const apiKey = process.env.OPENAI_API_KEY
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 })
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-3.5-turbo",
-        messages: formattedMessages,
-        temperature: 0.7,
-        max_tokens: 500,
-      }),
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction: systemPrompt,
     })
 
-    if (!response.ok) {
-      const error = await response.json()
-      console.error("OpenAI API error:", error)
-      return NextResponse.json(
-        { error: "Failed to get response from AI service" },
-        { status: response.status }
-      )
-    }
+    const chatHistory = messages.map((msg) => ({
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: msg.content }],
+    }))
 
-    const data = await response.json()
-    const content =
-      data.choices?.[0]?.message?.content ||
-      "I couldn't generate a response. Please try again."
+    const result = await model.generateContent({
+      contents: chatHistory,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 500,
+      },
+    })
+
+    const content = result.response.text() || "I couldn't generate a response. Please try again."
 
     return NextResponse.json({
       content,
       persona: activePersona,
     })
   } catch (error) {
-    console.error("Chat API error:", error)
+    console.error("Gemini chat API error:", error)
     return NextResponse.json(
       {
         error:
           error instanceof Error
-            ? error.message
+            ? `Gemini error: ${error.message}`
             : "Internal server error occurred",
       },
       { status: 500 }

@@ -9,11 +9,13 @@ This application demonstrates prompt engineering principles by implementing thre
 ## Features
 
 ✨ **Three Distinct Personas**
+
 - **Anshuman Singh** — The First-Principles Master (Socratic method, algorithmic thinking)
 - **Abhimanyu Saxena** — The System Architecture Realist (production-focused, scalability)
 - **Kshitij Mishra** — The Pragmatic Full-Stack Mentor (hands-on debugging, modern frameworks)
 
 🎨 **Clean, Responsive UI**
+
 - Modern gradient design with dark theme
 - Persona switcher with visual indicators
 - Suggestion chips for quick-start questions
@@ -21,6 +23,7 @@ This application demonstrates prompt engineering principles by implementing thre
 - Mobile-responsive layout
 
 💡 **Smart Features**
+
 - Automatic conversation reset when persona switches
 - Suggestion chips relevant to each persona
 - Error handling with user-friendly messages
@@ -28,6 +31,7 @@ This application demonstrates prompt engineering principles by implementing thre
 - Smooth message scrolling
 
 🔒 **Security**
+
 - API keys stored in environment variables (never hardcoded)
 - `.env.example` provided for reference
 - No sensitive data committed to repository
@@ -36,7 +40,7 @@ This application demonstrates prompt engineering principles by implementing thre
 
 - **Frontend:** Next.js 14 (App Router), React 18, Tailwind CSS
 - **Backend:** Next.js API Routes
-- **LLM:** OpenAI GPT-3.5 Turbo (easily switchable to other providers)
+- **LLM:** Google Gemini (via `@google/generative-ai`)
 - **Deployment:** Vercel (or Netlify, Railway, etc.)
 
 ## Setup Instructions
@@ -44,29 +48,33 @@ This application demonstrates prompt engineering principles by implementing thre
 ### Prerequisites
 
 - Node.js 18+ and npm
-- OpenAI API key (or alternative LLM provider)
+- Google Gemini API key
 
 ### Local Development
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd Persona_Based_AI_ChatBOT
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Set up environment variables**
+
    ```bash
    cp .env.example .env.local
-   # Edit .env.local and add your OpenAI API key
-   OPENAI_API_KEY=sk-...
+   # Edit .env.local and add your Gemini API key
+   GOOGLE_API_KEY=your_google_api_key_here
    ```
 
 4. **Run the development server**
+
    ```bash
    npm run dev
    ```
@@ -81,6 +89,7 @@ This application demonstrates prompt engineering principles by implementing thre
 ### Deploy to Vercel (Recommended)
 
 1. **Push to GitHub**
+
    ```bash
    git add .
    git commit -m "Initial commit"
@@ -91,7 +100,7 @@ This application demonstrates prompt engineering principles by implementing thre
    - Visit [vercel.com](https://vercel.com)
    - Click "New Project"
    - Import your GitHub repository
-   - Add environment variable: `OPENAI_API_KEY`
+   - Add environment variable: `GOOGLE_API_KEY`
    - Deploy
 
 3. **Your live app is now available at `your-project.vercel.app`**
@@ -99,11 +108,13 @@ This application demonstrates prompt engineering principles by implementing thre
 ### Deploy to Netlify
 
 1. **Build the project**
+
    ```bash
    npm run build
    ```
 
 2. **Deploy using Netlify CLI**
+
    ```bash
    npm install -g netlify-cli
    netlify deploy --prod
@@ -135,6 +146,7 @@ This application demonstrates prompt engineering principles by implementing thre
 ## How It Works
 
 ### Frontend Flow
+
 1. User selects a persona from the top switcher
 2. Active persona is highlighted; conversation resets
 3. User can click suggestion chips or type their question
@@ -143,15 +155,17 @@ This application demonstrates prompt engineering principles by implementing thre
 6. AI response is displayed with appropriate styling
 
 ### Backend Flow
+
 1. API route receives POST request with messages and persona
 2. Appropriate system prompt is prepended to messages
-3. OpenAI API is called with the formatted message stack
+3. Gemini API is called with the formatted message stack
 4. Response is returned to frontend
 5. Frontend displays the streamed or standard JSON response
 
 ## System Prompts
 
 All three system prompts are documented in detail in [prompts.md](prompts.md), including:
+
 - Persona descriptions and values
 - Chain-of-thought instructions
 - Few-shot examples
@@ -159,20 +173,24 @@ All three system prompts are documented in detail in [prompts.md](prompts.md), i
 
 ## Troubleshooting
 
-**Issue: "OpenAI API key not configured"**
-- Ensure `.env.local` file exists with `OPENAI_API_KEY=sk-...`
+**Issue: "Gemini API key not configured"**
+
+- Ensure `.env.local` file exists with `GOOGLE_API_KEY=your_google_api_key_here`
 - Restart the development server after adding the key
 
 **Issue: CORS errors**
+
 - Ensure you're using the correct API endpoint
 - Check that the API route is at `/api/chat`
 
 **Issue: Slow responses**
-- OpenAI API calls may take 5-10 seconds
+
+- Gemini API calls may take 5-10 seconds
 - Check your API rate limits
-- Consider upgrading your OpenAI plan
+- Consider upgrading your Gemini quota or plan
 
 **Issue: Mobile layout looks broken**
+
 - Clear browser cache
 - Try a different mobile device/browser
 
@@ -201,6 +219,7 @@ This is an assignment project. However, feel free to fork and extend!
 ## Marking Rubric
 
 This project is evaluated on:
+
 1. **GitHub Repository** (2 pts) — Clean structure, `.env.example`, no API keys committed, clear README
 2. **Live Deployment** (2 pts) — Live URL accessible, persona switching works in production
 3. **Frontend Quality** (2 pts) — Clean UI, switcher works, suggestion chips present, typing indicator, mobile-friendly
@@ -214,6 +233,7 @@ Educational project for Scaler Academy | Prompt Engineering Assignment
 ## Support
 
 For issues or questions:
+
 1. Check this README
 2. Review [prompts.md](prompts.md) for system prompt details
 3. Check [reflection.md](reflection.md) for design rationale

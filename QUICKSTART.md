@@ -6,12 +6,12 @@ Complete these steps to get your Persona-Based AI Chatbot running locally.
 
 - [ ] Install Node.js 18+ from https://nodejs.org
 - [ ] Install Git from https://git-scm.com
-- [ ] Get OpenAI API key from https://platform.openai.com/account/api-keys
+- [ ] Get Gemini API key from Google AI Studio
 
 ## Step 2: Setup (2 minutes)
 
 - [ ] `cp .env.example .env.local`
-- [ ] Edit `.env.local` and paste your OpenAI API key
+- [ ] Edit `.env.local` and paste your Gemini API key
 - [ ] Verify `.env.local` is in your `.gitignore` (should be already)
 
 ## Step 3: Install & Run (3 minutes)
@@ -36,14 +36,17 @@ npm run dev
 ## Step 5: Verify All Personas
 
 **Anshuman (First-Principles Master)**
+
 - [ ] Ask: "How do I solve the two-sum problem?"
 - [ ] Expected: Socratic questions, no complete code
 
 **Abhimanyu (System Architecture)**
+
 - [ ] Ask: "Should I use SQL or NoSQL?"
 - [ ] Expected: Architecture trade-offs, production focus
 
 **Kshitij (Full-Stack Mentor)**
+
 - [ ] Ask: "My app is slow on page load"
 - [ ] Expected: Specific debugging steps, actionable advice
 
@@ -70,7 +73,7 @@ npm run dev
 - [ ] Click "New Project" → Import Git Repo
 - [ ] Select your repository
 - [ ] Go to Settings → Environment Variables
-- [ ] Add: `OPENAI_API_KEY = your_actual_key`
+- [ ] Add: `GOOGLE_API_KEY = your_actual_key`
 - [ ] Click Deploy
 - [ ] Wait 30-60 seconds
 - [ ] Click "Visit" to see your live app
@@ -79,18 +82,23 @@ npm run dev
 ## Troubleshooting
 
 **Q: "Cannot find module 'next'"**
+
 - A: Run `npm install`
 
-**Q: "OpenAI API key not configured"**
-- A: Check `.env.local` has `OPENAI_API_KEY=sk-...` (no quotes)
+**Q: "Gemini API key not configured"**
+
+- A: Check `.env.local` has `GOOGLE_API_KEY=your_key_here` (no quotes)
 
 **Q: API returns "401 Unauthorized"**
-- A: API key is wrong or expired. Get a new one from OpenAI
+
+- A: API key is wrong or expired. Get a new one from Google AI Studio
 
 **Q: Typing indicator doesn't show**
+
 - A: Clear browser cache or use Incognito mode
 
 **Q: Vercel deployment fails**
+
 - A: Check build logs. Usually missing `.env` variable
 
 ## What to Do Next
