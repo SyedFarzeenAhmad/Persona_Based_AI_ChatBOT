@@ -1,10 +1,16 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 
 interface Message {
+  id: string
   role: "user" | "assistant"
   content: string
+}
+
+interface StreamPayload {
+  content?: string
+  error?: string
 }
 
 const PERSONAS = [
@@ -12,168 +18,338 @@ const PERSONAS = [
     id: "anshuman",
     name: "Anshuman Singh",
     color: "from-blue-500 to-blue-600",
-    description: "First-Principles Master",
+    description: "Calm, exacting, Socratic",
   },
   {
     id: "abhimanyu",
     name: "Abhimanyu Saxena",
     color: "from-purple-500 to-purple-600",
-    description: "System Architecture Realist",
+    description: "Direct, strategic, founder-mode",
   },
   {
     id: "kshitij",
     name: "Kshitij Mishra",
     color: "from-pink-500 to-pink-600",
-    description: "Pragmatic Full-Stack Mentor",
+    description: "Warm, energetic, hands-on",
   },
-]
+] as const
 
-const SUGGESTION_CHIPS = {
+type PersonaId = (typeof PERSONAS)[number]["id"]
+
+const SUGGESTION_CHIPS: Record<PersonaId, string[]> = {
   anshuman: [
-    "How do I optimize my algorithm?",
-    "Explain time and space complexity",
-    "What's the best approach for dynamic programming?",
+    "Be strict: what is wrong with my DP thinking?",
+    "Help me reason from first principles",
+    "Don't give code, guide my algorithm approach",
   ],
   abhimanyu: [
-    "How should I design my system for scale?",
-    "SQL vs NoSQL - which should I use?",
-    "What are the key trade-offs in microservices?",
+    "Give me the blunt production view",
+    "Should I optimize for speed or scale right now?",
+    "What breaks first in this architecture?",
   ],
   kshitij: [
-    "Help me debug my Next.js app",
-    "How do I fix CORS errors?",
-    "What's the best way to structure a full-stack app?",
+    "Pair-debug this Next.js bug with me",
+    "Tell me the most likely root cause first",
+    "Give me one practical fix to try right now",
   ],
 }
 
+function createMessage(role: Message["role"], content: string): Message {
+  return {
+    id: crypto.randomUUID(),
+    role,
+    content,
+  }
+}
+
+function parseSseEvent(block: string) {
+  let event = "message"
+  const dataLines: string[] = []
+
+  for (const line of block.split("\n")) {
+    if (!line || line.startsWith(":")) {
+      continue
+    }
+
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim()
+      continue
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim())
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null
+  }
+
+  try {
+    return {
+      event,
+      payload: JSON.parse(dataLines.join("\n")) as StreamPayload,
+    }
+  } catch {
+    throw new Error("Received a malformed streaming response from the server.")
+  }
+}
+
+async function readErrorMessage(response: Response) {
+  const contentType = response.headers.get("content-type") ?? ""
+
+  if (contentType.includes("application/json")) {
+    const data = await response.json().catch(() => null)
+    if (data?.error) {
+      return data.error as string
+    }
+  }
+
+  const text = await response.text().catch(() => "")
+  return text || `Request failed with status ${response.status}`
+}
+
+async function readAssistantStream(
+  stream: ReadableStream<Uint8Array>,
+  onContent: (content: string) => void
+) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let latestContent = ""
+
+  const processBuffer = (flush = false) => {
+    let delimiterIndex = buffer.indexOf("\n\n")
+
+    while (delimiterIndex !== -1) {
+      const rawEvent = buffer.slice(0, delimiterIndex).trim()
+      buffer = buffer.slice(delimiterIndex + 2)
+
+      if (rawEvent) {
+        const parsedEvent = parseSseEvent(rawEvent)
+        if (parsedEvent?.event === "token" || parsedEvent?.event === "done") {
+          if (typeof parsedEvent.payload.content === "string") {
+            latestContent = parsedEvent.payload.content
+            onContent(latestContent)
+          }
+        }
+
+        if (parsedEvent?.event === "error") {
+          throw new Error(parsedEvent.payload.error || "The model stream failed.")
+        }
+      }
+
+      delimiterIndex = buffer.indexOf("\n\n")
+    }
+
+    if (flush && buffer.trim()) {
+      const parsedEvent = parseSseEvent(buffer.trim())
+      buffer = ""
+
+      if (parsedEvent?.event === "token" || parsedEvent?.event === "done") {
+        if (typeof parsedEvent.payload.content === "string") {
+          latestContent = parsedEvent.payload.content
+          onContent(latestContent)
+        }
+      }
+
+      if (parsedEvent?.event === "error") {
+        throw new Error(parsedEvent.payload.error || "The model stream failed.")
+      }
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n")
+    processBuffer()
+  }
+
+  buffer += decoder.decode().replace(/\r\n/g, "\n")
+  processBuffer(true)
+
+  return latestContent
+}
+
 export default function ChatPage() {
-  const [activePersona, setActivePersona] = useState<string>("anshuman")
+  const [activePersona, setActivePersona] = useState<PersonaId>("anshuman")
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const activeRequestIdRef = useRef(0)
 
-  // Scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({
+      behavior: isLoading ? "auto" : "smooth",
+    })
+  }, [isLoading, messages])
 
-  // Reset messages when persona changes
-  const handlePersonaChange = (personaId: string) => {
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort()
+    }
+  }, [])
+
+  const updateAssistantMessage = (messageId: string, content: string) => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === messageId ? { ...message, content } : message
+      )
+    )
+  }
+
+  const handlePersonaChange = (personaId: PersonaId) => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    activeRequestIdRef.current += 1
+
     setActivePersona(personaId)
     setMessages([])
     setError(null)
     setInputValue("")
+    setIsLoading(false)
   }
 
-  // Handle sending a message
-  const handleSendMessage = async (messageText: string) => {
-    if (!messageText.trim()) return
+  const handleSendMessage = async (rawMessageText: string) => {
+    const messageText = rawMessageText.trim()
+    if (!messageText || isLoading) {
+      return
+    }
 
-    // Add user message to the chat
-    const userMessage: Message = { role: "user", content: messageText }
-    const newMessages = [...messages, userMessage]
-    setMessages(newMessages)
+    abortControllerRef.current?.abort()
+
+    const requestId = activeRequestIdRef.current + 1
+    activeRequestIdRef.current = requestId
+
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    const personaAtSend = activePersona
+    const userMessage = createMessage("user", messageText)
+    const assistantMessage = createMessage("assistant", "")
+    const requestMessages = [
+      ...messages.map(({ role, content }) => ({ role, content })),
+      { role: "user" as const, content: messageText },
+    ]
+
+    setMessages((prev) => [...prev, userMessage, assistantMessage])
     setInputValue("")
     setError(null)
     setIsLoading(true)
 
+    let latestAssistantContent = ""
+
     try {
-      // Send request to backend API
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        signal: controller.signal,
         body: JSON.stringify({
-          messages: newMessages,
-          activePersona,
+          messages: requestMessages,
+          activePersona: personaAtSend,
         }),
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(
-          errorData.error || `API error: ${response.statusText}`
-        )
+        throw new Error(await readErrorMessage(response))
       }
 
-      // Handle streaming or standard JSON response
-      if (response.headers.get("content-type")?.includes("text/event-stream")) {
-        // Handle streaming response
-        const reader = response.body?.getReader()
-        const decoder = new TextDecoder()
-        let assistantMessage = ""
+      if (!response.body) {
+        throw new Error("The response stream was empty.")
+      }
 
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
+      const contentType = response.headers.get("content-type") ?? ""
 
-            const chunk = decoder.decode(value)
-            const lines = chunk.split("\n")
+      if (contentType.includes("text/event-stream")) {
+        latestAssistantContent = await readAssistantStream(response.body, (content) => {
+          latestAssistantContent = content
 
-            for (const line of lines) {
-              if (line.startsWith("data: ")) {
-                try {
-                  const data = JSON.parse(line.slice(6))
-                  if (data.content) {
-                    assistantMessage += data.content
-                  }
-                } catch (e) {
-                  // Skip invalid JSON
-                }
-              }
-            }
-
-            // Update message in real-time for streaming
-            setMessages((prev) => [
-              ...prev.slice(0, -1),
-              { role: "assistant", content: assistantMessage },
-            ])
+          if (activeRequestIdRef.current !== requestId) {
+            return
           }
-        }
+
+          updateAssistantMessage(assistantMessage.id, content)
+        })
       } else {
-        // Handle standard JSON response
         const data = await response.json()
-        const assistantMessage: Message = {
-          role: "assistant",
-          content: data.content,
+        if (typeof data.content !== "string" || !data.content.trim()) {
+          throw new Error("The model returned an empty response.")
         }
-        setMessages((prev) => [...prev, assistantMessage])
+
+        latestAssistantContent = data.content
+        if (activeRequestIdRef.current === requestId) {
+          updateAssistantMessage(assistantMessage.id, data.content)
+        }
+      }
+
+      if (!latestAssistantContent.trim()) {
+        throw new Error("The model returned an empty response.")
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        return
+      }
+
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get response"
-      setError(errorMessage)
+
+      if (activeRequestIdRef.current === requestId) {
+        setMessages((prev) => {
+          if (latestAssistantContent) {
+            return prev.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, content: latestAssistantContent }
+                : message
+            )
+          }
+
+          return prev.filter((message) => message.id !== assistantMessage.id)
+        })
+        setError(errorMessage)
+      }
+
       console.error("Chat error:", err)
     } finally {
-      setIsLoading(false)
-      inputRef.current?.focus()
+      if (activeRequestIdRef.current === requestId) {
+        abortControllerRef.current = null
+        setIsLoading(false)
+        inputRef.current?.focus()
+      }
     }
   }
 
-  const currentPersona = PERSONAS.find((p) => p.id === activePersona)!
-  const suggestions = SUGGESTION_CHIPS[activePersona as keyof typeof SUGGESTION_CHIPS]
+  const currentPersona =
+    PERSONAS.find((persona) => persona.id === activePersona) ?? PERSONAS[0]
+  const suggestions = SUGGESTION_CHIPS[activePersona]
+  const showTypingIndicator =
+    isLoading &&
+    messages[messages.length - 1]?.role === "assistant" &&
+    messages[messages.length - 1]?.content === ""
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Header */}
-      <header className="bg-slate-800/50 backdrop-blur border-b border-slate-700 p-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold mb-2">Persona-Based AI Chatbot</h1>
+    <div className="flex h-screen flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <header className="border-b border-slate-700 bg-slate-800/50 p-4 backdrop-blur">
+        <div className="mx-auto max-w-4xl">
+          <h1 className="mb-2 text-2xl font-bold">Persona-Based AI Chatbot</h1>
           <p className="text-sm text-slate-300">
             Chat with distinct AI personalities - each with unique perspectives
           </p>
         </div>
       </header>
 
-      {/* Persona Switcher */}
-      <div className="bg-slate-800/30 backdrop-blur border-b border-slate-700 p-4">
-        <div className="max-w-4xl mx-auto">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
+      <div className="border-b border-slate-700 bg-slate-800/30 p-4 backdrop-blur">
+        <div className="mx-auto max-w-4xl">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
             Select Persona
           </p>
           <div className="flex flex-wrap gap-3">
@@ -181,9 +357,9 @@ export default function ChatPage() {
               <button
                 key={persona.id}
                 onClick={() => handlePersonaChange(persona.id)}
-                className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+                className={`rounded-lg px-4 py-2 font-medium transition-all duration-200 ${
                   activePersona === persona.id
-                    ? `bg-gradient-to-r ${persona.color} text-white shadow-lg scale-105`
+                    ? `bg-gradient-to-r ${persona.color} scale-105 text-white shadow-lg`
                     : "bg-slate-700 text-slate-300 hover:bg-slate-600"
                 }`}
               >
@@ -195,34 +371,34 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <div className="max-w-4xl mx-auto w-full">
-          {/* Empty State with Suggestions */}
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center py-12 space-y-6">
-              <div className={`w-16 h-16 rounded-full bg-gradient-to-r ${currentPersona.color} flex items-center justify-center`}>
-                <span className="text-2xl font-bold">✨</span>
+            <div className="flex h-full flex-col items-center justify-center space-y-6 py-12 text-center">
+              <div
+                className={`flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r ${currentPersona.color}`}
+              >
+                <span className="text-lg font-bold">AI</span>
               </div>
               <div>
-                <h2 className="text-2xl font-bold mb-2">
+                <h2 className="mb-2 text-2xl font-bold">
                   Chat with {currentPersona.name}
                 </h2>
-                <p className="text-slate-400 max-w-sm">
+                <p className="max-w-sm text-slate-400">
                   {currentPersona.description} - Ask me anything!
                 </p>
               </div>
 
-              {/* Suggestion Chips */}
-              <div className="flex flex-col gap-2 w-full max-w-sm">
-                <p className="text-xs text-slate-400 uppercase font-semibold">
+              <div className="flex w-full max-w-sm flex-col gap-2">
+                <p className="text-xs font-semibold uppercase text-slate-400">
                   Suggested Questions
                 </p>
-                {suggestions.map((suggestion, idx) => (
+                {suggestions.map((suggestion) => (
                   <button
-                    key={idx}
+                    key={suggestion}
                     onClick={() => handleSendMessage(suggestion)}
-                    className="p-3 text-left rounded-lg bg-slate-700/50 hover:bg-slate-600 transition-colors text-sm border border-slate-600 hover:border-slate-500"
+                    disabled={isLoading}
+                    className="rounded-lg border border-slate-600 bg-slate-700/50 p-3 text-left text-sm transition-colors hover:border-slate-500 hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {suggestion}
                   </button>
@@ -231,10 +407,9 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* Messages */}
-          {messages.map((message, idx) => (
+          {messages.map((message) => (
             <div
-              key={idx}
+              key={message.id}
               className={`flex ${
                 message.role === "user" ? "justify-end" : "justify-start"
               }`}
@@ -242,24 +417,29 @@ export default function ChatPage() {
               <div
                 className={`max-w-2xl rounded-lg px-4 py-3 ${
                   message.role === "user"
-                    ? "bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-br-none"
-                    : "bg-slate-700 text-slate-100 rounded-bl-none"
+                    ? "rounded-br-none bg-gradient-to-r from-blue-600 to-blue-700 text-white"
+                    : "rounded-bl-none bg-slate-700 text-slate-100"
                 }`}
               >
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                <p className="whitespace-pre-wrap text-sm leading-relaxed">
                   {message.content}
                 </p>
               </div>
             </div>
           ))}
 
-          {/* Typing Indicator */}
-          {isLoading && (
+          {showTypingIndicator && (
             <div className="flex items-center space-x-2 p-3">
               <div className="flex items-center space-x-1">
-                <span className="inline-block w-2 h-2 bg-slate-400 rounded-full typing-dot" />
-                <span className="inline-block w-2 h-2 bg-slate-400 rounded-full typing-dot" style={{ animationDelay: "0.2s" }} />
-                <span className="inline-block w-2 h-2 bg-slate-400 rounded-full typing-dot" style={{ animationDelay: "0.4s" }} />
+                <span className="typing-dot inline-block h-2 w-2 rounded-full bg-slate-400" />
+                <span
+                  className="typing-dot inline-block h-2 w-2 rounded-full bg-slate-400"
+                  style={{ animationDelay: "0.2s" }}
+                />
+                <span
+                  className="typing-dot inline-block h-2 w-2 rounded-full bg-slate-400"
+                  style={{ animationDelay: "0.4s" }}
+                />
               </div>
               <span className="text-sm text-slate-400">
                 {currentPersona.name} is thinking...
@@ -267,25 +447,22 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* Error Message */}
           {error && (
-            <div className="p-4 rounded-lg bg-red-900/20 border border-red-700 text-red-200 text-sm">
-              <p className="font-semibold mb-1">Oops! Something went wrong</p>
+            <div className="rounded-lg border border-red-700 bg-red-900/20 p-4 text-sm text-red-200">
+              <p className="mb-1 font-semibold">Oops! Something went wrong</p>
               <p>{error}</p>
             </div>
           )}
 
-          {/* Scroll anchor */}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
-      {/* Input Area */}
-      <div className="bg-slate-800/50 backdrop-blur border-t border-slate-700 p-4">
-        <div className="max-w-4xl mx-auto">
+      <div className="border-t border-slate-700 bg-slate-800/50 p-4 backdrop-blur">
+        <div className="mx-auto max-w-4xl">
           <form
-            onSubmit={(e) => {
-              e.preventDefault()
+            onSubmit={(event) => {
+              event.preventDefault()
               handleSendMessage(inputValue)
             }}
             className="flex gap-3"
@@ -294,20 +471,20 @@ export default function ChatPage() {
               ref={inputRef}
               type="text"
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(event) => setInputValue(event.target.value)}
               disabled={isLoading}
               placeholder={`Ask ${currentPersona.name}...`}
-              className="flex-1 px-4 py-3 rounded-lg bg-slate-700 text-white placeholder-slate-400 border border-slate-600 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50 transition-all"
+              className="flex-1 rounded-lg border border-slate-600 bg-slate-700 px-4 py-3 text-white placeholder-slate-400 transition-all focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={isLoading || !inputValue.trim()}
-              className="px-6 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-all text-white hover:shadow-lg"
+              className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-3 font-medium text-white transition-all hover:from-blue-700 hover:to-blue-800 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Send
+              {isLoading ? "Streaming..." : "Send"}
             </button>
           </form>
-          <p className="text-xs text-slate-400 mt-2">
+          <p className="mt-2 text-xs text-slate-400">
             Press Enter or click Send to message {currentPersona.name}
           </p>
         </div>
