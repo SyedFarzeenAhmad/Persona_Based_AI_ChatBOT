@@ -1,0 +1,14 @@
+{
+  "buildCommand": "next build",
+  "devCommand": "next dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "env": [
+    {
+      "key": "OPENAI_API_KEY",
+      "description": "OpenAI API key for accessing GPT models",
+      "value": "",
+      "type": "secret"
+    }
+  ]
+}
