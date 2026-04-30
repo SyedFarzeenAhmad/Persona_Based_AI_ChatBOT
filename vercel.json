@@ -3,12 +3,10 @@
   "devCommand": "next dev",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "env": [
-    {
-      "key": "OPENAI_API_KEY",
-      "description": "OpenAI API key for accessing GPT models",
+  "env": {
+      "key": "GOOGLE_API_KEY",
+      "description": "Google API key for accessing Gemini models",
       "value": "",
       "type": "secret"
     }
-  ]
 }
